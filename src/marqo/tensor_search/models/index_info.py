@@ -1,16 +1,59 @@
 import pprint
 from typing import NamedTuple, Any, Dict
 from marqo.tensor_search import enums
-from marqo.tensor_search.enums import IndexSettingsField as NsFields
+from marqo.tensor_search.enums import IndexSettingsField as NsField, SpecialModels
 from marqo.tensor_search import configs
+from marqo.s2_inference import s2_inference
+from marqo import errors
+from marqo.s2_inference import errors as s2_inference_errors
+from marqo.tensor_search.validation import validate_model_properties_no_model
+
+
+# For use outside of this module
+def get_model_properties_from_index_defaults(index_defaults: Dict, model_name: str, properties_key: str):
+    """ Gets model_properties or search_model_properties from index defaults if available. Otherwise, it attempts to get it from the model registry.
+
+    Args:
+        index_defaults: index_defaults from index_settings
+        model_name: name of the model search_model
+        properties_key: Either NsField.model_properties or NsField.search_model_properties
+
+    Returns:
+        dict of model properties. Could either represent model_properties or search_model_properties.
+    """
+
+    try:
+        model_properties = index_defaults[properties_key]
+    except KeyError:
+        model_properties = None
+    
+    # Special validation for `no_model`
+    if model_name is SpecialModels.no_model:
+        validate_model_properties_no_model(model_properties)
+
+    # If model_properties not user-provided, try to get it from the model registry
+    elif model_properties is None:
+        try:
+            model_properties = s2_inference.get_model_properties_from_registry(model_name)
+        except s2_inference_errors.UnknownModelError as e:
+            raise errors.InvalidArgError(
+                f"Could not find properties in registry for model: {model_name}. "
+                f"If this is a registry model, please check that the model name is correct. "
+                f"Please provide {properties_key} if the model is a custom model.")
+    
+    return model_properties
+
 
 class IndexInfo(NamedTuple):
     """
-    model_name: name of the ML model used to encode the data
+    model_name: name of the ML model used to encode the data (for add documents)
+    search_model_name: name of the ML model used to encode the data (for search)
     properties: keys are different index field names, values
         provide info about the properties
+    index_settings: settings for the index
     """
     model_name: str
+    search_model_name: str
     properties: dict
     index_settings: dict
 
@@ -35,7 +78,17 @@ class IndexInfo(NamedTuple):
         This returns more than just pure text fields. For example: ints
         bool fields.
 
+
+        NOTE: get_text_properties will flatten the object properties
+        Example: left-text_properties   right-true_text_properties
+        {'Description': {'type': 'text'},                                                         {'Description': {'type': 'text'},
+         'Genre': {'type': 'text'},                                                                'Genre': {'type': 'text'},
+         'Title': {'type': 'text'},                                                                'Title': {'type': 'text'},
+         'my_combination_field': {'properties': {'lexical_field': {'type': 'text'}, ----->         'my_combination_field.lexical_field': {'type': 'text'},
+                                                 'my_image': {'type': 'text'},                     'my_combination_field.my_image': {'type': 'text'},
+                                                 'some_text': {'type': 'text'}}}}                   'my_combination_field.some_text': {'type': 'text'}}
         """
+
         text_props_dict = {}
         for text_field, text_props in self.properties.items():
             if not text_field.startswith(enums.TensorField.vector_prefix) and not text_field in enums.TensorField.__dict__.values():
@@ -46,14 +99,24 @@ class IndexInfo(NamedTuple):
                             text_props_dict[f"{text_field}.{sub_field}"] = sub_field_props
         return text_props_dict
 
-        # get_text_properties will flatten the object properties
-        # Example: left-text_properties   right-true_text_properties
-        # {'Description': {'type': 'text'},                                                         {'Description': {'type': 'text'},
-        #  'Genre': {'type': 'text'},                                                                'Genre': {'type': 'text'},
-        #  'Title': {'type': 'text'},                                                                'Title': {'type': 'text'},
-        #  'my_combination_field': {'properties': {'lexical_field': {'type': 'text'}, ----->         'my_combination_field.lexical_field': {'type': 'text'},
-        #                                          'my_image': {'type': 'text'},                     'my_combination_field.my_image': {'type': 'text'},
-        #                                          'some_text': {'type': 'text'}}}}                   'my_combination_field.some_text': {'type': 'text'}}
+    def get_model_properties(self) -> dict:
+        index_defaults = self.index_settings["index_defaults"]
+        return get_model_properties_from_index_defaults(
+            index_defaults=index_defaults, model_name=self.model_name, properties_key=NsField.model_properties
+        )
+    
+    def get_search_model_properties(self) -> dict:
+        """
+        Should not be called when search_model_name is None. tensor_search module should have called
+        get_model_properties instead.
+        """
+        if self.search_model_name is None:
+            raise errors.InternalError("Cannot get `search_model_properties` when `search_model` does not exist.")
+        
+        index_defaults = self.index_settings["index_defaults"]
+        return get_model_properties_from_index_defaults(
+            index_defaults=index_defaults, model_name=self.search_model_name, properties_key=NsField.search_model_properties
+        )
 
     def get_true_text_properties(self) -> dict:
         """returns a dict containing only names and properties of fields that
@@ -79,16 +142,16 @@ class IndexInfo(NamedTuple):
         
         """
         ann_default = configs.get_default_ann_parameters()
-        index_ann_defaults = self.index_settings[NsFields.index_defaults].get(NsFields.ann_parameters, {})
+        index_ann_defaults = self.index_settings[NsField.index_defaults].get(NsField.ann_parameters, {})
 
         # index defaults override generic defaults
         ann_params = {
             **ann_default,
             **index_ann_defaults
         }
-        ann_params[NsFields.ann_method_parameters] = {
-            **ann_default[NsFields.ann_method_parameters],
-            **index_ann_defaults.get(NsFields.ann_method_parameters, {})
+        ann_params[NsField.ann_method_parameters] = {
+            **ann_default[NsField.ann_method_parameters],
+            **index_ann_defaults.get(NsField.ann_method_parameters, {})
         }
 
         return ann_params

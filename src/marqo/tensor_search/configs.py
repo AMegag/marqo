@@ -8,12 +8,14 @@ def get_default_index_settings():
         NsFields.index_defaults: {
             NsFields.treat_urls_and_pointers_as_images: False, # only used for models that have text and vision encoders
             NsFields.model: ns_enums.MlModel.bert,
-#            NsFields.model_properties: dict(),
+            # search_model not here, as it is dynamically set based on model
             NsFields.normalize_embeddings: True,
             NsFields.text_preprocessing: {
                 NsFields.split_length: 2,
                 NsFields.split_overlap: 0,
-                NsFields.split_method: ns_enums.SplitMethod.sentence
+                NsFields.split_method: ns_enums.SplitMethod.sentence,
+                NsFields.override_text_chunk_prefix: None,
+                NsFields.override_text_query_prefix: None
             },
             # TODO move these into a processing dict with sub-dicts
             NsFields.image_preprocessing: {
@@ -21,8 +23,8 @@ def get_default_index_settings():
             },
             NsFields.ann_parameters: get_default_ann_parameters()
         },
-        NsFields.number_of_shards: 5,
-        NsFields.number_of_replicas : 1,
+        NsFields.number_of_shards: 3,
+        NsFields.number_of_replicas: 0,
     }
 
 def get_default_ann_parameters():
@@ -61,5 +63,12 @@ def default_env_vars() -> dict:
         EnvVars.MARQO_MAX_DELETE_DOCS_COUNT: 10000,
         EnvVars.MARQO_MAX_SEARCHABLE_TENSOR_ATTRIBUTES: None,
         EnvVars.MARQO_MAX_NUMBER_OF_REPLICAS: 1,
+        EnvVars.MARQO_MAX_ADD_DOCS_COUNT: 64,
+        EnvVars.DEFAULT_MARQO_MAX_BACKEND_RETRY_ATTEMPTS: 0,
+        EnvVars.DEFAULT_MARQO_MAX_BACKEND_RETRY_BACKOFF: 1,
+        EnvVars.MARQO_MAX_BACKEND_SEARCH_RETRY_ATTEMPTS: 0,
+        EnvVars.MARQO_MAX_BACKEND_SEARCH_RETRY_BACKOFF: 1,
+        EnvVars.MARQO_MAX_BACKEND_ADD_DOCS_RETRY_ATTEMPTS: 0,
+        EnvVars.MARQO_MAX_BACKEND_ADD_DOCS_RETRY_BACKOFF: 1
     }
 

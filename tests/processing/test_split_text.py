@@ -1,4 +1,4 @@
-from marqo.s2_inference.processing.text import split_text
+from marqo.s2_inference.processing.text import split_text, prefix_text_chunks
 import unittest
 import copy
 
@@ -38,6 +38,26 @@ class TestSplitText(unittest.TestCase):
             result = split_text(self.none_string, split_by=split_by)
             assert result == [' ']
 
+    def test_split_text_single_character(self):
+        text = "a"
+        for split_by in self.split_by_valid:
+            result = split_text(text, split_by=split_by)
+            assert result == [text]
+
+    def test_split_text_whitespace(self):
+        ws = [
+            " ",
+            "\r",
+            "   ",
+            "\r\t",
+            "\r  \t"
+        ]
+
+        for text in ws:
+            for split_by in self.split_by_valid:
+                result = split_text(text, split_by=split_by)
+                assert result == [" "]
+
     def test_split_text_single_word(self):
         
         text = 'short'
@@ -59,3 +79,21 @@ class TestSplitText(unittest.TestCase):
         result = split_text(text, split_by='sentence', split_length=4, split_overlap=1)
         assert result == [text]
 
+
+class TestPrefixTextChunks(unittest.TestCase):
+    def test_prefix_text_chunks(self):
+        text_splits = ["a", "b", "c", ""]
+        assert prefix_text_chunks(text_splits, "prefix_") == \
+            ["prefix_a", "prefix_b", "prefix_c", "prefix_"]
+    
+    def test_prefix_text_chunks_empty_prefix(self):
+        text_splits = ["a", "b", "c", ""]
+        # Empty string prefix should do nothing
+        assert prefix_text_chunks(text_splits, "") == \
+            ["a", "b", "c", ""]
+    
+    def test_prefix_text_chunks_none(self):
+        text_splits = ["a", "b", "c", ""]
+        # None prefix should do nothing
+        assert prefix_text_chunks(text_splits, None) == \
+            ["a", "b", "c", ""]

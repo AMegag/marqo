@@ -2,6 +2,7 @@ name: dind_os_CI
 # runs Integration Tests on DIND OS on AMD64 machine
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       image_to_test:
@@ -39,13 +40,13 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          ec2-image-id:  ${{ secrets.AMD_EC2_IMAGE_ID }}
+          ec2-image-id:  ${{ secrets.AMD_200GB_EC2_IMAGE_ID }}
           ec2-instance-type: t3.xlarge
           subnet-id: ${{ secrets.AMD_SUBNET_ID }}
           security-group-id: ${{ secrets.AMD_SECURITY_GROUP_ID }}
 
   Test-Marqo:
-    name: Run Marqo Test Suite
+    name: Run Docker-in-Docker API Tests
     needs: Start-Runner # required to start the main job when the runner is ready
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
                 

@@ -17,7 +17,12 @@ from marqo.tensor_search.index_meta_cache import get_index_info as get_cached_in
 import pprint
 
 
-def get_index_info(config: Config, index_name: str) -> IndexInfo:
+def get_index_info(
+        config: Config,
+        index_name: str,
+        max_retry_attempts: int = None,
+        max_retry_backoff_seconds: int = None
+    ) -> IndexInfo:
     """Gets useful information about the index. Also updates the IndexInfo cache
 
     Args:
@@ -28,22 +33,33 @@ def get_index_info(config: Config, index_name: str) -> IndexInfo:
         IndexInfo of the index
 
     Raises:
-        NonTensorIndexError, if the index's mapping doesn't conform to a Tensor Search index
-
+        NonTensorIndexError: If the index's mapping doesn't conform to a Tensor Search index.
+        IndexNotFoundError: If index does not exist.
     """
-    res = HttpRequests(config).get(path=F"{index_name}/_mapping")
+    res = HttpRequests(config).get(
+        path=F"{index_name}/_mapping",
+        max_retry_attempts=max_retry_attempts,
+        max_retry_backoff_seconds=max_retry_backoff_seconds
+    )
 
     if not (index_name in res and "mappings" in res[index_name]
             and "_meta" in res[index_name]["mappings"]):
         raise errors.NonTensorIndexError(
             f"Error retrieving index info for index {index_name}")
 
+    # Identify index `model` from mapping metadata
     if "model" in res[index_name]["mappings"]["_meta"]:
         model_name = res[index_name]["mappings"]["_meta"]["model"]
     else:
         raise errors.NonTensorIndexError(
             "get_index_info: couldn't identify embedding model name "
             F"in index mappings! Mapping: {res}")
+    
+    # Identify index `search_model` from mapping metadata
+    if "search_model" in res[index_name]["mappings"]["_meta"]:
+        search_model_name = res[index_name]["mappings"]["_meta"]["search_model"]
+    else:
+        search_model_name = None    # placeholder for backwards compatibility
 
     if "index_settings" in res[index_name]["mappings"]["_meta"]:
         index_settings = res[index_name]["mappings"]["_meta"]["index_settings"]
@@ -54,7 +70,7 @@ def get_index_info(config: Config, index_name: str) -> IndexInfo:
 
     index_properties = res[index_name]["mappings"]["properties"]
 
-    index_info = IndexInfo(model_name=model_name, properties=index_properties,
+    index_info = IndexInfo(model_name=model_name, search_model_name=search_model_name, properties=index_properties,
                            index_settings=index_settings)
     get_cache()[index_name] = index_info
     return index_info
@@ -62,7 +78,9 @@ def get_index_info(config: Config, index_name: str) -> IndexInfo:
 
 def add_customer_field_properties(config: Config, index_name: str,
                                   customer_field_names: Iterable[Tuple[str, enums.OpenSearchDataType]],
-                                  model_properties: dict, multimodal_combination_fields: Dict[str, Iterable[Tuple[str, enums.OpenSearchDataType]]]):
+                                  multimodal_combination_fields: Dict[str, Iterable[Tuple[str, enums.OpenSearchDataType]]],
+                                  max_retry_attempts: int = None,
+                                  max_retry_backoff_seconds: int = None) -> None:
     """Adds new customer fields to index mapping.
 
     Pushes the updated mapping to OpenSearch, and updates the local cache.
@@ -73,32 +91,17 @@ def add_customer_field_properties(config: Config, index_name: str,
         customer_field_names: list of 2-tuples. The first elem in the tuple is
             the new fieldnames the customers have made. The second elem is the
             inferred OpenSearch data type.
-        model_properties: properties of the machine learning model
 
     Returns:
         HTTP Response
     """
     existing_info = get_cached_index_info(config=config, index_name=index_name)
 
-    # check if there is multimodal fie;ds and convert the fields name to a list with the same
-    # format of customer_field_names
-    knn_field_names = copy.deepcopy(customer_field_names)
-    if len(multimodal_combination_fields) > 0:
-        multimodal_customer_field_names = set([(field_name, "_") for field_name in list(multimodal_combination_fields)])
-        knn_field_names = knn_field_names.union(multimodal_customer_field_names)
-
     body = {
         "properties": {
             enums.TensorField.chunks: {
                 "type": "nested",
-                "properties": {
-                    validation.validate_vector_name(
-                        utils.generate_vector_name(field_name[0])): {
-                        "type": "knn_vector",
-                        "dimension": model_properties["dimensions"],
-                        "method": existing_info.get_ann_parameters()
-                    } for field_name in knn_field_names
-                }
+                "properties": {}
             }
         }
     }
@@ -124,7 +127,12 @@ def add_customer_field_properties(config: Config, index_name: str,
         },
     }
 
-    mapping_res = HttpRequests(config).put(path=F"{index_name}/_mapping", body=json.dumps(body))
+    mapping_res = HttpRequests(config).put(
+        path=F"{index_name}/_mapping",
+        body=json.dumps(body),
+        max_retry_attempts=max_retry_attempts,
+        max_retry_backoff_seconds=max_retry_backoff_seconds
+    )
 
     merged_chunk_properties = {
         **existing_info.properties[enums.TensorField.chunks]["properties"],
@@ -146,7 +154,6 @@ def add_customer_field_properties(config: Config, index_name: str,
             "type": type_to_set
         }
 
-
     for multimodal_field, child_fields in multimodal_combination_fields.items():
         # update the new multimodal_field if it's not in it
         if multimodal_field not in new_index_properties:
@@ -160,13 +167,14 @@ def add_customer_field_properties(config: Config, index_name: str,
 
     get_cache()[index_name] = IndexInfo(
         model_name=existing_info.model_name,
+        search_model_name=existing_info.search_model_name,
         properties=new_index_properties,
         index_settings=existing_info.index_settings.copy()
     )
     return mapping_res
 
 
-def get_cluster_indices(config: Config):
+def get_cluster_indices(config: Config) -> set:
     """Gets the name of all indices, excluding system indices"""
     res = HttpRequests(config).get(path="_aliases")
     return _remove_system_indices(res.keys())

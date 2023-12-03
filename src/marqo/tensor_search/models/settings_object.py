@@ -1,3 +1,7 @@
+"""
+The settings object should be validated by JSON schema, rather than PyDantic, so that it can be used as a template for
+documentation and potentially front-end validation (for usability). 
+"""
 from marqo.tensor_search import enums as ns_enums
 from marqo.tensor_search.enums import IndexSettingsField as NsFields, EnvVars, ObjectStores
 from marqo.tensor_search.utils import read_env_vars_and_defaults, read_env_vars_and_defaults_ints
@@ -38,6 +42,15 @@ settings_schema = {
                 NsFields.model_properties: {
                     "type": "object",
                 },
+                NsFields.search_model: {
+                    "type": "string",
+                    "examples": [
+                        "hf/all_datasets_v4_MiniLM-L6"
+                    ]
+                },
+                NsFields.search_model_properties: {
+                    "type": "object",
+                },
                 NsFields.normalize_embeddings: {
                     "type": "boolean",
                     "examples": [
@@ -68,6 +81,18 @@ settings_schema = {
                             "type": "string",
                             "examples": [
                                 "sentence"
+                            ]
+                        },
+                        NsFields.override_text_chunk_prefix: {  # prefix override is optional
+                            "type": ["null", "string"],
+                            "examples": [
+                                "passage: "
+                            ]
+                        },
+                        NsFields.override_text_query_prefix: {  # prefix override is optional
+                            "type": ["null", "string"],
+                            "examples": [
+                                "query: "
                             ]
                         }
                     },
@@ -221,7 +246,7 @@ settings_schema = {
                 }
             }
         },
-        NsFields.number_of_shards: 5,
-        NsFields.number_of_replicas: 1
+        NsFields.number_of_shards: 3,
+        NsFields.number_of_replicas: 0
     }]
 }
